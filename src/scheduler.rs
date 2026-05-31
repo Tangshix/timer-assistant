@@ -71,6 +71,28 @@ impl TaskScheduler {
         tasks.values().cloned().collect()
     }
 
+    /// 获取下一个任务的倒计时信息
+    /// 返回格式：Some((任务类型, 剩余秒数)) 或 None
+    pub fn get_next_countdown(&self) -> Option<(TaskType, i64)> {
+        let tasks = self.tasks.lock().unwrap();
+        let now = Local::now();
+        
+        let mut next_task: Option<(TaskType, i64)> = None;
+        
+        for task in tasks.values() {
+            if task.enabled && task.scheduled_time > now {
+                let remaining = (task.scheduled_time - now).num_seconds();
+                
+                // 如果是第一个任务，或者时间更早
+                if next_task.is_none() || remaining < next_task.as_ref().unwrap().1 {
+                    next_task = Some((task.task_type.clone(), remaining));
+                }
+            }
+        }
+        
+        next_task
+    }
+
     /// 清空所有任务
     pub fn clear_all(&mut self) {
         let mut tasks = self.tasks.lock().unwrap();

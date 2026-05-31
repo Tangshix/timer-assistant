@@ -26,6 +26,10 @@ struct TimerApp {
     last_visible: bool,
     /// 重绘通知接收器
     repaint_receiver: Mutex<mpsc::Receiver<bool>>,
+    /// 倒计时接收器
+    countdown_receiver: Option<mpsc::Receiver<(String, i64)>>,
+    /// 托盘图标（需要在 update 中更新）
+    tray_icon: Option<tray_icon::TrayIcon>,
 }
 
 impl TimerApp {
@@ -51,6 +55,8 @@ impl TimerApp {
             visible: Arc::new(AtomicBool::new(true)),
             last_visible: true,
             repaint_receiver: Mutex::new(rx),
+            countdown_receiver: None,
+            tray_icon: None,
         }
     }
 }
@@ -61,6 +67,16 @@ impl eframe::App for TimerApp {
         if let Ok(rx) = self.repaint_receiver.lock() {
             while rx.try_recv().is_ok() {
                 // 收到通知，继续执行
+            }
+        }
+        
+        // 检查并更新倒计时
+        if let Some(rx) = &self.countdown_receiver {
+            while let Ok((text, remaining_secs)) = rx.try_recv() {
+                // 更新托盘图标
+                if let Some(ref tray_icon) = self.tray_icon {
+                    tray::update_tray_countdown(tray_icon, &text, remaining_secs);
+                }
             }
         }
         
@@ -299,11 +315,55 @@ impl eframe::App for TimerApp {
 
 fn main() -> eframe::Result<()> {
     // 创建应用
-    let app = TimerApp::new();
+    let mut app = TimerApp::new();
     let visible_clone = app.visible.clone();
+    let scheduler_clone = app.scheduler.clone();
     
     // 初始化托盘（传入 visible 状态）
-    let (_tray_icon, _event_receiver) = tray::create_tray_icon(visible_clone.clone());
+    let (tray_icon, countdown_rx, countdown_tx) = tray::create_tray_icon(visible_clone.clone());
+    
+    // 启动倒计时更新线程
+    let scheduler_clone = app.scheduler.clone();
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            
+            // 获取下一个任务的倒计时
+            if let Ok(scheduler) = scheduler_clone.lock() {
+                if let Some((task_type, remaining_secs)) = scheduler.get_next_countdown() {
+                    // 格式化倒计时文本
+                    let task_name = match task_type {
+                        TaskType::Shutdown => "关机",
+                        TaskType::Reboot => "重启",
+                        TaskType::LockScreen => "锁屏",
+                        TaskType::Popup => "弹窗",
+                    };
+                    
+                    let hours = remaining_secs / 3600;
+                    let minutes = (remaining_secs % 3600) / 60;
+                    let seconds = remaining_secs % 60;
+                    
+                    let countdown_text = if hours > 0 {
+                        format!("⏰ {} - {:02}:{:02}:{:02}", task_name, hours, minutes, seconds)
+                    } else {
+                        format!(" {} - {:02}:{:02}", task_name, minutes, seconds)
+                    };
+                    
+                    // 发送倒计时文本和剩余秒数到主线程
+                    let _ = countdown_tx.send((countdown_text, remaining_secs));
+                } else {
+                    // 没有任务
+                    let _ = countdown_tx.send(("暂无任务".to_string(), 0));
+                }
+            }
+        }
+    });
+    
+    // 在 TimerApp 中添加倒计时接收器
+    let mut app_with_countdown = {
+        app.countdown_receiver = Some(countdown_rx);
+        app
+    };
 
     // 窗口选项
     let native_options = eframe::NativeOptions {
@@ -336,7 +396,10 @@ fn main() -> eframe::Result<()> {
             
             cc.egui_ctx.set_fonts(fonts);
             
-            Ok(Box::new(app))
+            // 设置托盘图标
+            app_with_countdown.tray_icon = Some(tray_icon);
+            
+            Ok(Box::new(app_with_countdown))
         }),
     )
 }
