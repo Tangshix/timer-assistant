@@ -1,0 +1,37 @@
+[package]
+name = "timer-assistant"
+version = "0.1.0"
+edition = "2024"
+
+[target.'cfg(windows)'.build-dependencies]
+embed-resource = "2.4"
+
+[dependencies]
+# GUI 框架 - 升级到最新版本以支持更好的中文输入
+egui = "0.31"
+eframe = { version = "0.31", features = ["persistence"] }
+
+# 系统托盘
+tray-icon = "0.19"
+tao = "0.31"
+
+# 异步运行时和定时器
+tokio = { version = "1", features = ["full"] }
+
+# Windows API
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_System_Shutdown",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Security",
+    "Win32_System_Threading",
+] }
+
+# 工具库
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1"
+uuid = { version = "1", features = ["v4"] }
+image = "0.24"
