@@ -1,3 +1,4 @@
 fn main() {
-    // Windows 图标嵌入暂时注释，稍后手动创建
+    // Slint 构建配置
+    slint_build::compile("ui/timer_app.slint").unwrap();
 }

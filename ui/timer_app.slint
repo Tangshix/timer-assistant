@@ -1,0 +1,258 @@
+// 简单的定时器助手 UI - 使用原生 Slint 组件
+import { Button, Slider, ComboBox, TextEdit, ScrollView } from "std-widgets.slint";
+
+component TimerItem inherits Rectangle {
+    in property<string> task-type;
+    in property<string> scheduled-time;
+    in property<bool> enabled;
+    in property<string> id;
+
+    callback toggle();
+    callback remove();
+
+    background: #fafafa;
+    border-width: 1px;
+    border-color: #e0e0e0;
+    min-height: 32px;
+
+    HorizontalLayout {
+        padding: 4px;
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 8px;
+        alignment: stretch;
+
+        Text {
+            text: root.task-type;
+            color: #333;
+            min-width: 60px;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: "-";
+            color: #999;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: root.scheduled-time;
+            color: #666;
+            horizontal-stretch: 1;
+            vertical-alignment: center;
+        }
+
+        Button {
+            text: root.enabled ? "启用" : "禁用";
+            min-width: 32px;
+            max-width: 50px;
+            clicked => { root.toggle(); }
+        }
+
+        Button {
+            text: "删除";
+            min-width: 32px;
+            max-width: 50px;
+            clicked => { root.remove(); }
+        }
+    }
+}
+
+export component TimerApp inherits Window {
+    width: 550px;
+    height: 650px;
+    in-out property<string> window-title: "电脑定时助手";
+    title: root.window-title;
+
+    // 回调函数
+    callback add-task();
+    callback remove-task(string);
+    callback toggle-task(string);
+    callback clear-all();
+    callback exit-app();
+    callback minimize-to-tray();
+
+    // 属性
+    in-out property<int> selected-hour: 22;
+    in-out property<int> selected-minute: 0;
+    in-out property<string> selected-task-type: "弹窗提醒";
+    in-out property<string> popup-message: "这是您的定时提醒消息！";
+    
+    // 任务列表数据
+    in-out property<[string]> task-ids: [];
+    in-out property<[string]> task-types: [];
+    in-out property<[string]> task-times: [];
+    in-out property<[bool]> task-enabled: [];
+
+    Rectangle {
+        background: #f5f5f5;
+        
+        VerticalLayout {
+            padding: 10px;
+            spacing: 10px;
+
+            // 标题
+            Text {
+                text: "⏰ 电脑定时助手";
+                font-size: 24px;
+                color: #333;
+            }
+
+            Rectangle { height: 1px; background: #ddd; }
+
+            // 时间选择区域
+            Rectangle {
+                background: white;
+                border-radius: 5px;
+                border-width: 1px;
+                border-color: #ccc;
+                
+                VerticalLayout {
+                    padding: 10px;
+                    spacing: 10px;
+                    
+                    Text { 
+                        text: "⏰ 设置定时时间";
+                        font-weight: 600;
+                    }
+                    
+                    HorizontalLayout {
+                        spacing: 10px;
+                        Text { text: "当前选择:"; }
+                        Text { 
+                            text: root.selected-hour + ":" + (root.selected-minute < 10 ? "0" + root.selected-minute : "" + root.selected-minute);
+                            color: #0078d4;
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 10px;
+                        Text { text: "小时:"; }
+                        Slider {
+                            minimum: 0;
+                            maximum: 23;
+                            value: root.selected-hour;
+                            changed(value) => { root.selected-hour = value; }
+                        }
+                        Text { text: root.selected-hour + ""; min-width: 30px; }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 10px;
+                        Text { text: "分钟:"; }
+                        Slider {
+                            minimum: 0;
+                            maximum: 59;
+                            value: root.selected-minute;
+                            changed(value) => { root.selected-minute = value; }
+                        }
+                        Text { text: root.selected-minute + ""; min-width: 30px; }
+                    }
+                }
+            }
+
+            // 任务类型选择
+            Rectangle {
+                background: white;
+                border-radius: 5px;
+                border-width: 1px;
+                border-color: #ccc;
+                
+                VerticalLayout {
+                    padding: 10px;
+                    spacing: 10px;
+                    
+                    Text { 
+                        text: "🎯 选择任务类型";
+                        font-weight: 600;
+                    }
+                    
+                    ComboBox {
+                        model: ["弹窗提醒", "锁屏", "重启", "关机"];
+                        current-value: root.selected-task-type;
+                        selected(value) => { root.selected-task-type = value; }
+                    }
+
+                    // 弹窗消息输入（仅弹窗提醒类型显示）
+                    if root.selected-task-type == "弹窗提醒" : Text {
+                        text: "💬 弹窗消息内容:";
+                    }
+                    if root.selected-task-type == "弹窗提醒" : TextEdit {
+                        text: root.popup-message;
+                        placeholder-text: "请输入弹窗提示内容...";
+                        height: 80px;
+                        edited(text) => { root.popup-message = text; }
+                    }
+                }
+            }
+
+            // 添加任务按钮
+            Button {
+                text: "➕ 添加定时任务";
+                clicked => { root.add-task(); }
+            }
+
+            Rectangle { height: 1px; background: #ddd; }
+
+            // 任务列表
+            Text { 
+                text: "📋 任务列表:";
+                font-weight: 600;
+            }
+
+            Rectangle {
+                background: white;
+                border-radius: 5px;
+                border-width: 1px;
+                border-color: #ccc;
+                
+                ScrollView {
+                    VerticalLayout {
+                        padding: 4px;
+                        spacing: 3px;
+                        
+                        for i in root.task-ids.length : TimerItem {
+                            task-type: root.task-types[i];
+                            scheduled-time: root.task-times[i];
+                            enabled: root.task-enabled[i];
+                            id: root.task-ids[i];
+                            
+                            toggle => { root.toggle-task(root.task-ids[i]); }
+                            remove => { root.remove-task(root.task-ids[i]); }
+                        }
+                        
+                        Rectangle {
+                            visible: root.task-ids.length == 0;
+                            Text {
+                                text: "暂无任务";
+                                color: #999;
+                            }
+                        }
+                    }
+                }
+            }
+
+            Rectangle { height: 1px; background: #ddd; }
+
+            // 底部按钮
+            HorizontalLayout {
+                spacing: 10px;
+                
+                Button {
+                    text: "🗑️ 清空所有任务";
+                    clicked => { root.clear-all(); }
+                }
+                
+                Button {
+                    text: "➖ 最小化到托盘";
+                    clicked => { root.minimize-to-tray(); }
+                }
+                
+                Button {
+                    text: "❌ 退出";
+                    clicked => { root.exit-app(); }
+                }
+            }
+        }
+    }
+}

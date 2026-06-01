@@ -1,428 +1,340 @@
+#[cfg(target_os = "macos")]
+#[macro_use]
+extern crate objc;
+
 mod tray;
 mod windows_api;
 mod scheduler;
 
-use eframe::egui;
 use std::sync::{Arc, Mutex};
+#[cfg(not(target_os = "macos"))]
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc;
 use chrono::{Local, Timelike};
 use scheduler::{TaskScheduler, ScheduledTask, TaskType};
+#[cfg(target_os = "macos")]
+use cocoa::base::{nil, id};
 
-/// 应用程序状态
-struct TimerApp {
-    /// 任务调度器
-    scheduler: Arc<Mutex<TaskScheduler>>,
-    /// 当前选中的时间
-    selected_hour: u32,
-    selected_minute: u32,
-    /// 当前选中的任务类型
-    selected_task: TaskType,
-    /// 弹窗消息内容（仅对 Popup 任务有效）
-    popup_message: String,
-    /// 是否显示窗口（使用 Arc<AtomicBool> 以便跨线程访问）
-    visible: Arc<AtomicBool>,
-    /// 上一次检测到的可见状态（用于检测状态变化）
-    last_visible: bool,
-    /// 重绘通知接收器
-    repaint_receiver: Mutex<mpsc::Receiver<bool>>,
-    /// 倒计时接收器
-    countdown_receiver: Option<mpsc::Receiver<(String, i64)>>,
-    /// 托盘图标（需要在 update 中更新）
-    tray_icon: Option<tray_icon::TrayIcon>,
-}
+// Windows 托盘图标（需保持存活）
+#[cfg(not(target_os = "macos"))]
+static TRAY_ICON: std::sync::OnceLock<tray_icon::TrayIcon> = std::sync::OnceLock::new();
+// Windows 关闭/最小化信号
+#[cfg(not(target_os = "macos"))]
+static REQUEST_MINIMIZE: AtomicBool = AtomicBool::new(false);
 
-impl TimerApp {
-    fn new() -> Self {
-        let (tx, rx) = mpsc::channel();
-        
-        // 启动一个线程来监听 visible 状态变化并通知重绘
-        std::thread::spawn(move || {
-            loop {
-                std::thread::sleep(std::time::Duration::from_millis(50));
-                if tx.send(true).is_err() {
-                    break;
-                }
-            }
-        });
-        
-        Self {
-            scheduler: Arc::new(Mutex::new(TaskScheduler::new())),
-            selected_hour: 22,
-            selected_minute: 0,
-            selected_task: TaskType::Shutdown,
-            popup_message: String::from("这是您的定时提醒消息！"),
-            visible: Arc::new(AtomicBool::new(true)),
-            last_visible: true,
-            repaint_receiver: Mutex::new(rx),
-            countdown_receiver: None,
-            tray_icon: None,
-        }
-    }
-}
+slint::include_modules!();
 
-impl eframe::App for TimerApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // 检查是否有重绘通知
-        if let Ok(rx) = self.repaint_receiver.lock() {
-            while rx.try_recv().is_ok() {
-                // 收到通知，继续执行
-            }
-        }
-        
-        // 检查并更新倒计时
-        if let Some(rx) = &self.countdown_receiver {
-            while let Ok((text, remaining_secs)) = rx.try_recv() {
-                // 更新托盘图标
-                if let Some(ref tray_icon) = self.tray_icon {
-                    tray::update_tray_countdown(tray_icon, &text, remaining_secs);
-                }
-            }
-        }
-        
-        // 从 Arc<AtomicBool> 读取可见状态
-        let is_visible = self.visible.load(Ordering::SeqCst);
-        
-        // 检测可见状态变化（即使在不可见状态下也要检测）
-        if is_visible != self.last_visible {
-            self.last_visible = is_visible;
-            println!("窗口可见性变化: {} -> {}", if self.last_visible { "false" } else { "true" }, is_visible);
-            
-            // 发送窗口可见性命令
-            println!("发送 ViewportCommand::Visible({})", is_visible);
-            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(is_visible));
-            
-            // 同时强制请求重绘
-            ctx.request_repaint();
-            
-            // 如果窗口变为可见，确保它获得焦点
-            if is_visible {
-                println!("窗口变为可见，发送聚焦命令");
-                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-            }
-        }
-        
-        // 如果不可见，不渲染UI内容，但要持续请求重绘以检测状态变化
-        if !is_visible {
-            // 持续请求重绘，确保能检测到 visible 状态的变化
-            ctx.request_repaint_after(std::time::Duration::from_millis(100));
-            return;
-        }
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // 创建应用状态
+    let scheduler = Arc::new(Mutex::new(TaskScheduler::new()));
 
-        egui::CentralPanel::default().show(ctx, |ui| {
-            // 标题
-            ui.vertical_centered(|ui| {
-                ui.add_space(10.0);
-                ui.heading("⏰ 电脑定时助手");
-                ui.add_space(5.0);
-            });
-            
-            ui.separator();
-            ui.add_space(10.0);
+    // 先创建 Slint UI
+    let ui = TimerApp::new()?;
 
-            // 时间选择区域
-            ui.group(|ui| {
-                ui.horizontal(|ui| {
-                    ui.label("⏰ 设置定时时间:");
-                    ui.add_space(10.0);
-                    ui.label(format!(
-                        "{:02}:{:02}",
-                        self.selected_hour, self.selected_minute
-                    ));
-                });
-                
-                ui.add_space(5.0);
-                ui.horizontal(|ui| {
-                    ui.label("小时:");
-                    ui.add(egui::Slider::new(&mut self.selected_hour, 0..=23));
-                    
-                    ui.label("分钟:");
-                    ui.add(egui::Slider::new(&mut self.selected_minute, 0..=59));
-                });
-            });
+    // 拦截窗口关闭事件：隐藏整个应用到托盘，而非退出
+    #[cfg(target_os = "macos")]
+    ui.window().on_close_requested(|| unsafe {
+        let app: id = msg_send![class!(NSApplication), sharedApplication];
+        let _: () = msg_send![app, hide:nil];
+        slint::CloseRequestResponse::KeepWindowShown
+    });
 
-            ui.add_space(10.0);
+    #[cfg(not(target_os = "macos"))]
+    ui.window().on_close_requested(|| {
+        REQUEST_MINIMIZE.store(true, Ordering::Relaxed);
+        slint::CloseRequestResponse::KeepWindowShown
+    });
 
-            // 任务类型选择
-            ui.group(|ui| {
-                ui.label("🎯 选择任务类型:");
-                ui.add_space(5.0);
-                
-                egui::ComboBox::from_label("")
-                    .selected_text(match self.selected_task {
-                        TaskType::Shutdown => "关机",
-                        TaskType::Reboot => "重启",
-                        TaskType::LockScreen => "锁屏",
-                        TaskType::Popup => "弹窗提醒",
-                    })
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut self.selected_task, TaskType::Shutdown, "关机");
-                        ui.selectable_value(&mut self.selected_task, TaskType::Reboot, "重启");
-                        ui.selectable_value(&mut self.selected_task, TaskType::LockScreen, "锁屏");
-                        ui.selectable_value(&mut self.selected_task, TaskType::Popup, "弹窗提醒");
-                    });
-                
-                // 如果选择了弹窗任务，显示消息输入框
-                if self.selected_task == TaskType::Popup {
-                    ui.add_space(10.0);
-                    ui.label("💬 弹窗消息内容:");
-                    ui.add_space(5.0);
-                    
-                    // 使用多行文本编辑器，新版本 egui 对中文支持更好
-                    ui.add(
-                        egui::TextEdit::multiline(&mut self.popup_message)
-                            .desired_rows(4)
-                            .desired_width(f32::INFINITY)
-                            .hint_text("请输入弹窗提示内容..."),
-                    );
-                }
-            });
+    // 创建 macOS 菜单栏托盘图标
+    #[cfg(target_os = "macos")]
+    let status_item = {
+        use cocoa::appkit::{NSStatusBar, NSStatusItem, NSMenu, NSMenuItem, NSButton};
+        use cocoa::base::selector;
+        use cocoa::foundation::NSString;
+        use objc::runtime::{Object, Sel};
+        use objc::declare::ClassDecl;
 
-            ui.add_space(15.0);
+        unsafe {
+            let status_item = NSStatusBar::systemStatusBar(nil).statusItemWithLength_(-1.0);
+            let button = status_item.button();
+            let title = NSString::alloc(nil).init_str("\u{23F0}");
+            button.setTitle_(title);
+            let _: () = msg_send![title, release];
 
-            // 添加任务按钮
-            ui.horizontal_centered(|ui| {
-                let button = ui.add_sized(
-                    [200.0, 35.0],
-                    egui::Button::new("➕ 添加定时任务")
+            let menu = NSMenu::new(nil);
+            let show_item = NSMenuItem::alloc(nil)
+                .initWithTitle_action_keyEquivalent_(
+                    NSString::alloc(nil).init_str("显示主窗口"),
+                    selector("showWindow:"),
+                    NSString::alloc(nil).init_str(""),
                 );
-                if button.clicked() {
-                    let now = Local::now();
-                    
-                    // 创建预定时间
-                    let mut scheduled_time = now
-                        .with_hour(self.selected_hour)
-                        .unwrap_or(now)
-                        .with_minute(self.selected_minute)
-                        .unwrap_or(now)
-                        .with_second(0)
-                        .unwrap_or(now)
-                        .with_nanosecond(0)
-                        .unwrap_or(now);
-                    
-                    // 如果时间已过，设置为明天
-                    if scheduled_time <= now {
-                        scheduled_time = scheduled_time + chrono::Duration::days(1);
-                    }
+            menu.addItem_(show_item);
+            menu.addItem_(NSMenuItem::separatorItem(nil));
+            let quit_item = NSMenuItem::alloc(nil)
+                .initWithTitle_action_keyEquivalent_(
+                    NSString::alloc(nil).init_str("退出"),
+                    selector("terminate:"),
+                    NSString::alloc(nil).init_str("q"),
+                );
+            menu.addItem_(quit_item);
+            status_item.setMenu_(menu);
 
-                    // 只为 Popup 任务设置消息
-                    let message = if self.selected_task == TaskType::Popup {
-                        Some(self.popup_message.clone())
-                    } else {
-                        None
-                    };
-
-                    let task = ScheduledTask {
-                        id: uuid::Uuid::new_v4().to_string(),
-                        task_type: self.selected_task.clone(),
-                        scheduled_time,
-                        enabled: true,
-                        message,
-                    };
-
-                    if let Ok(mut scheduler) = self.scheduler.lock() {
-                        scheduler.add_task(task);
-                    }
+            // 菜单项"显示主窗口"：激活应用（自动恢复所有窗口）
+            let mut cls = ClassDecl::new("TrayClickHandler", class!(NSObject)).unwrap();
+            extern "C" fn show_window(_this: &Object, _sel: Sel, _sender: id) {
+                unsafe {
+                    let app: id = msg_send![class!(NSApplication), sharedApplication];
+                    let _: () = msg_send![app, activateIgnoringOtherApps: true];
                 }
-            });
+            }
+            cls.add_method(
+                sel!(showWindow:),
+                show_window as extern "C" fn(&Object, Sel, id),
+            );
+            let handler_cls = cls.register();
+            let handler: id = msg_send![handler_cls, new];
+            let _: () = msg_send![show_item, setTarget:handler];
+            let _: () = msg_send![show_item, setAction:sel!(showWindow:)];
 
-            ui.add_space(15.0);
-            ui.separator();
-            ui.add_space(10.0);
-            ui.label("📋 任务列表:");
-            ui.add_space(5.0);
+            status_item
+        }
+    };
 
-            // 任务列表 - 使用 ScrollArea
-            egui::ScrollArea::vertical()
-                .max_height(200.0)
-                .show(ui, |ui| {
-                    let tasks = {
-                        let scheduler = self.scheduler.lock().unwrap();
-                        scheduler.get_tasks()
-                    };
-                                
-                    if tasks.is_empty() {
-                        ui.centered_and_justified(|ui| {
-                            ui.label("暂无任务");
-                        });
-                    } else {
-                        for task in tasks {
-                            ui.group(|ui| {
-                                ui.horizontal(|ui| {
-                                    let icon = match task.task_type {
-                                        TaskType::Shutdown => "",
-                                        TaskType::Reboot => "",
-                                        TaskType::LockScreen => "",
-                                        TaskType::Popup => "",
-                                    };
-                                    
-                                    ui.label(icon);
-                                    ui.label(match task.task_type {
-                                        TaskType::Shutdown => "关机",
-                                        TaskType::Reboot => "重启",
-                                        TaskType::LockScreen => "锁屏",
-                                        TaskType::Popup => "弹窗提醒",
-                                    });
-                                    ui.label(format!(
-                                        " - {}",
-                                        task.scheduled_time.format("%Y-%m-%d %H:%M")
-                                    ));
-                                    
-                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                        if ui.small_button("❌").clicked() {
-                                            let scheduler = self.scheduler.clone();
-                                            let task_id = task.id.clone();
-                                            std::thread::spawn(move || {
-                                                if let Ok(mut s) = scheduler.lock() {
-                                                    s.remove_task(&task_id);
-                                                }
-                                            });
-                                        }
-                                        
-                                        let status = if task.enabled { "✅" } else { "⏸️" };
-                                        if ui.small_button(status).clicked() {
-                                            let scheduler = self.scheduler.clone();
-                                            let task_id = task.id.clone();
-                                            std::thread::spawn(move || {
-                                                if let Ok(mut s) = scheduler.lock() {
-                                                    s.toggle_task(&task_id);
-                                                }
-                                            });
-                                        }
-                                    });
-                                });
-                            });
-                        }
-                    }
-                });
+    // 创建 Windows/Linux 系统托盘图标
+    #[cfg(not(target_os = "macos"))]
+    {
+        let ui_weak_tray = ui.as_weak();
+        let _ = TRAY_ICON.set(tray::create_tray_icon(move || {
+            if let Some(ui_ref) = ui_weak_tray.upgrade() {
+                ui_ref.window().show().ok();
+            }
+        }));
+    }
 
-            ui.add_space(10.0);
-            ui.separator();
-            ui.add_space(10.0);
-            
-            // 底部按钮
-            ui.horizontal(|ui| {
-                if ui.button("🗑️ 清空所有任务").clicked() {
-                    if let Ok(mut scheduler) = self.scheduler.lock() {
-                        scheduler.clear_all();
-                    }
+    // Windows 托盘菜单事件轮询 + 最小化信号处理
+    #[cfg(not(target_os = "macos"))]
+    {
+        let ui_weak_poll = ui.as_weak();
+        let poll_timer = slint::Timer::default();
+        poll_timer.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(100), move || {
+            if REQUEST_MINIMIZE.swap(false, Ordering::Relaxed) {
+                if let Some(ui_ref) = ui_weak_poll.upgrade() {
+                    ui_ref.window().set_minimized(true);
                 }
-                
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("❌ 退出").clicked() {
-                        std::process::exit(0);
-                    }
-                    
-                    if ui.button("➖ 最小化到托盘").clicked() {
-                        self.visible.store(false, Ordering::SeqCst);
-                    }
-                });
-            });
+            }
         });
     }
-}
 
-fn main() -> eframe::Result<()> {
-    // 创建应用
-    let mut app = TimerApp::new();
-    let visible_clone = app.visible.clone();
-    let _scheduler_clone = app.scheduler.clone();
-    
-    // 初始化托盘（传入 visible 状态）
-    let (tray_icon, countdown_rx, countdown_tx) = tray::create_tray_icon(visible_clone.clone());
-    
-    // 启动倒计时更新线程
-    let scheduler_clone = app.scheduler.clone();
-    std::thread::spawn(move || {
-        loop {
-            std::thread::sleep(std::time::Duration::from_secs(1));
-            
-            // 获取下一个任务的倒计时
-            if let Ok(scheduler) = scheduler_clone.lock() {
-                if let Some((task_type, remaining_secs)) = scheduler.get_next_countdown() {
-                    // 格式化倒计时文本
-                    let task_name = match task_type {
+    // 定时刷新任务列表 + 更新窗口标题和托盘 tooltip
+    let scheduler_refresh = scheduler.clone();
+    let ui_weak_refresh = ui.as_weak();
+    let refresh_timer = slint::Timer::default();
+    refresh_timer.start(slint::TimerMode::Repeated, std::time::Duration::from_secs(1), move || {
+        if let Some(ui_ref) = ui_weak_refresh.upgrade() {
+            update_task_list(&ui_ref, &scheduler_refresh);
+            let (title, tray_text, tooltip) = if let Ok(sched) = scheduler_refresh.lock() {
+                if let Some((task_type, remaining)) = sched.get_next_countdown() {
+                    let name = match task_type {
                         TaskType::Shutdown => "关机",
                         TaskType::Reboot => "重启",
                         TaskType::LockScreen => "锁屏",
                         TaskType::Popup => "弹窗",
                     };
-                    
-                    let hours = remaining_secs / 3600;
-                    let minutes = (remaining_secs % 3600) / 60;
-                    let seconds = remaining_secs % 60;
-                    
-                    let countdown_text = if hours > 0 {
-                        format!("⏰ {} - {:02}:{:02}:{:02}", task_name, hours, minutes, seconds)
+                    let h = remaining / 3600;
+                    let m = (remaining % 3600) / 60;
+                    let s = remaining % 60;
+                    let time_str = if h > 0 {
+                        format!("{:02}:{:02}:{:02}", h, m, s)
                     } else {
-                        format!(" {} - {:02}:{:02}", task_name, minutes, seconds)
+                        format!("{:02}:{:02}", m, s)
                     };
-                    
-                    // 发送倒计时文本和剩余秒数到主线程
-                    let _ = countdown_tx.send((countdown_text, remaining_secs));
+                    let title = format!("电脑定时助手 - {} {}", name, time_str);
+                    let tray = format!("\u{23F0} {}", time_str);
+                    let tip = format!("{} {} 剩余", name, time_str);
+                    (title, tray, tip)
                 } else {
-                    // 没有任务
-                    let _ = countdown_tx.send(("暂无任务".to_string(), 0));
+                    ("电脑定时助手".to_string(), "\u{23F0}".to_string(), "暂无任务".to_string())
                 }
+            } else {
+                ("电脑定时助手".to_string(), "\u{23F0}".to_string(), "暂无任务".to_string())
+            };
+            ui_ref.set_window_title(title.into());
+            // 更新托盘图标：倒计时文字 + tooltip
+            #[cfg(target_os = "macos")]
+            unsafe {
+                use cocoa::appkit::{NSStatusItem, NSButton};
+                use cocoa::base::nil;
+                use cocoa::foundation::NSString;
+                let button = status_item.button();
+                let btn_title = NSString::alloc(nil).init_str(&tray_text);
+                button.setTitle_(btn_title);
+                let _: () = msg_send![btn_title, release];
+                let tip = NSString::alloc(nil).init_str(&tooltip);
+                let _: () = msg_send![button, setToolTip:tip];
+                let _: () = msg_send![tip, release];
             }
         }
     });
     
-    // 在 TimerApp 中添加倒计时接收器
-    let mut app_with_countdown = {
-        app.countdown_receiver = Some(countdown_rx);
-        app
-    };
+    // drop(countdown_tx); // 关闭原始发送端，只保留克隆的
+    
+    // 设置初始值
+    ui.set_selected_hour(22);
+    ui.set_selected_minute(0);
+    ui.set_selected_task_type("弹窗提醒".into());
+    ui.set_popup_message("这是您的定时提醒消息！".into());
+    
+    // 添加任务回调
+    let scheduler_add = scheduler.clone();
+    let ui_weak_add = ui.as_weak();
+    ui.on_add_task(move || {
+        let Some(ui_clone) = ui_weak_add.upgrade() else { return };
+        let hour = ui_clone.get_selected_hour() as u32;
+        let minute = ui_clone.get_selected_minute() as u32;
+        let task_type_str = ui_clone.get_selected_task_type();
+        let popup_msg = ui_clone.get_popup_message();
+        
+        let task_type = match task_type_str.as_str() {
+            "关机" => TaskType::Shutdown,
+            "重启" => TaskType::Reboot,
+            "锁屏" => TaskType::LockScreen,
+            "弹窗提醒" => TaskType::Popup,
+            _ => TaskType::Shutdown,
+        };
+        
+        let now = Local::now();
+        
+        // 创建预定时间
+        let mut scheduled_time = now
+            .with_hour(hour)
+            .unwrap_or(now)
+            .with_minute(minute)
+            .unwrap_or(now)
+            .with_second(0)
+            .unwrap_or(now)
+            .with_nanosecond(0)
+            .unwrap_or(now);
+        
+        // 如果时间已过，设置为明天
+        if scheduled_time <= now {
+            scheduled_time = scheduled_time + chrono::Duration::days(1);
+        }
 
-    // 窗口选项
-    let native_options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("电脑定时助手")
-            .with_inner_size([550.0, 650.0])
-            .with_min_inner_size([450.0, 500.0])
-            .with_icon(eframe::icon_data::from_png_bytes(include_bytes!("../icons/app.png")).unwrap()),
-        ..Default::default()
-    };
+        // 只为 Popup 任务设置消息
+        let message = if task_type == TaskType::Popup {
+            Some(popup_msg.to_string())
+        } else {
+            None
+        };
 
-    // 运行应用，配置中文字体
-    eframe::run_native(
-        "电脑定时助手",
-        native_options,
-        Box::new(|cc| {
-            // 配置中文字体支持
-            let mut fonts = egui::FontDefinitions::default();
-            
-            // 根据平台添加中文字体
-            #[cfg(windows)]
-            {
-                // Windows: 使用宋体
-                fonts.font_data.insert(
-                    "chinese_font".to_owned(),
-                    std::sync::Arc::new(egui::FontData::from_static(include_bytes!("../fonts/simsun.ttc"))),
-                );
-            }
-            
-            #[cfg(target_os = "macos")]
-            {
-                // macOS: 使用系统自带中文字体（苹方）
-                // 苹方字体在 macOS 上的路径
-                fonts.font_data.insert(
-                    "chinese_font".to_owned(),
-                    std::sync::Arc::new(egui::FontData::from_static(include_bytes!("../fonts/PingFang.ttc"))),
-                );
-            }
-            
-            // 将中文字体添加到所有字体家族的最前面
-            for family in fonts.families.values_mut() {
-                family.insert(0, "chinese_font".to_owned());
-            }
-            
-            cc.egui_ctx.set_fonts(fonts);
-            
-            // 设置托盘图标
-            app_with_countdown.tray_icon = Some(tray_icon);
-            
-            Ok(Box::new(app_with_countdown))
-        }),
-    )
+        let task = ScheduledTask {
+            id: uuid::Uuid::new_v4().to_string(),
+            task_type: task_type.clone(),
+            scheduled_time,
+            enabled: true,
+            message,
+        };
+
+        if let Ok(mut sched) = scheduler_add.lock() {
+            sched.add_task(task);
+        }
+        
+        // 刷新任务列表
+        update_task_list(&ui_clone, &scheduler_add);
+    });
+    
+    // 移除任务回调
+    let scheduler_remove = scheduler.clone();
+    let ui_weak_remove = ui.as_weak();
+    ui.on_remove_task(move |task_id| {
+        if let Ok(mut sched) = scheduler_remove.lock() {
+            sched.remove_task(&task_id.as_str());
+        }
+        if let Some(ui_r) = ui_weak_remove.upgrade() {
+            update_task_list(&ui_r, &scheduler_remove);
+        }
+    });
+    
+    // 切换任务状态回调
+    let scheduler_toggle = scheduler.clone();
+    let ui_weak_toggle = ui.as_weak();
+    ui.on_toggle_task(move |task_id| {
+        if let Ok(mut sched) = scheduler_toggle.lock() {
+            sched.toggle_task(&task_id.as_str());
+        }
+        if let Some(ui_t) = ui_weak_toggle.upgrade() {
+            update_task_list(&ui_t, &scheduler_toggle);
+        }
+    });
+    
+    // 清空所有任务回调
+    let scheduler_clear = scheduler.clone();
+    let ui_weak_clear = ui.as_weak();
+    ui.on_clear_all(move || {
+        if let Ok(mut sched) = scheduler_clear.lock() {
+            sched.clear_all();
+        }
+        if let Some(ui_c) = ui_weak_clear.upgrade() {
+            update_task_list(&ui_c, &scheduler_clear);
+        }
+    });
+    
+    // 退出应用回调
+    ui.on_exit_app(|| {
+        std::process::exit(0);
+    });
+    
+    // 最小化到托盘回调（隐藏整个应用）
+    #[cfg(target_os = "macos")]
+    ui.on_minimize_to_tray(|| unsafe {
+        let app: id = msg_send![class!(NSApplication), sharedApplication];
+        let _: () = msg_send![app, hide:nil];
+    });
+
+    #[cfg(not(target_os = "macos"))]
+    ui.on_minimize_to_tray(|| {
+        REQUEST_MINIMIZE.store(true, Ordering::Relaxed);
+    });
+    
+    // 初始加载任务列表
+    update_task_list(&ui, &scheduler);
+    
+    // 运行应用
+    ui.run()?;
+    
+    Ok(())
+}
+
+/// 更新任务列表显示
+fn update_task_list(ui: &TimerApp, scheduler: &Arc<Mutex<TaskScheduler>>) {
+    let tasks = if let Ok(sched) = scheduler.lock() {
+        sched.get_tasks()
+    } else {
+        return;
+    };
+    
+    let mut ids = Vec::new();
+    let mut types_vec = Vec::new();
+    let mut times = Vec::new();
+    let mut enabled = Vec::new();
+    
+    for task in tasks {
+        let task_type_str = match task.task_type {
+            TaskType::Shutdown => "关机",
+            TaskType::Reboot => "重启",
+            TaskType::LockScreen => "锁屏",
+            TaskType::Popup => "弹窗提醒",
+        };
+        
+        let time_str = task.scheduled_time.format("%Y-%m-%d %H:%M").to_string();
+        
+        ids.push(task.id.into());
+        types_vec.push(task_type_str.into());
+        times.push(time_str.into());
+        enabled.push(task.enabled);
+    }
+    
+    ui.set_task_ids(std::rc::Rc::new(slint::VecModel::from(ids)).into());
+    ui.set_task_types(std::rc::Rc::new(slint::VecModel::from(types_vec)).into());
+    ui.set_task_times(std::rc::Rc::new(slint::VecModel::from(times)).into());
+    ui.set_task_enabled(std::rc::Rc::new(slint::VecModel::from(enabled)).into());
 }
