@@ -1,27 +1,26 @@
 # ⏰ 电脑定时助手
 
-一个基于 Rust + egui 的跨平台定时任务管理工具，支持 Windows 和 macOS，提供关机、重启、锁屏和弹窗提醒功能。
+一个基于 Rust + Slint 的跨平台定时任务管理工具，支持 Windows 和 macOS，提供关机、重启、锁屏和弹窗提醒功能。
 
 ## ✨ 功能特性
 
 - 🔴 **定时关机** - 在指定时间自动关闭计算机
-- 🔄 **定时重启** - 在指定时间自动重启计算机  
+- 🔄 **定时重启** - 在指定时间自动重启计算机
 - 🔒 **定时锁屏** - 在指定时间锁定屏幕
-- 💬 **弹窗提醒** - 在指定时间显示提醒消息
+- 💬 **弹窗提醒** - 在指定时间显示自定义提醒消息
 - 📋 **任务管理** - 添加、删除、启用/禁用定时任务
-- 🗂️ **托盘后台** - 最小化到系统托盘，后台运行
-- 🎨 **简洁界面** - 基于 egui 的现代化 UI
+- 🗂️ **托盘后台** - 关闭窗口后最小化到系统托盘，后台运行
+- ⏱️ **倒计时显示** - 窗口标题栏和托盘图标实时显示最近任务倒计时
 - 🌐 **跨平台支持** - 支持 Windows 10/11 和 macOS
 
 ## 🛠️ 技术栈
 
-- **GUI 框架**: egui + eframe
-- **系统托盘**: tray-icon + tao
-- **异步运行时**: tokio
+- **GUI 框架**: Slint 1.6
+- **系统托盘**: macOS 原生 cocoa API / Windows tray-icon crate
 - **Windows API**: windows crate
-- **macOS API**: osascript (AppleScript)
+- **macOS API**: osascript (AppleScript) + cocoa
 - **时间处理**: chrono
-- **配置管理**: serde + toml
+- **构建**: slint-build（编译 `ui/timer_app.slint`）
 
 ## 📦 安装与编译
 
@@ -50,19 +49,18 @@ cargo build --release
 cargo run
 ```
 
-编译后的可执行文件位于 `target/release/timer-assistant.exe`
-
 ## 🚀 使用方法
 
-1. **启动程序** - 运行 `timer-assistant.exe`
+1. **启动程序** - 运行编译后的可执行文件
 2. **设置时间** - 使用滑块选择小时和分钟
-3. **选择任务** - 从下拉菜单选择任务类型（关机/重启/锁屏/弹窗）
-4. **添加任务** - 点击"添加定时任务"按钮
-5. **管理任务** - 在任务列表中可以：
-   - 点击 ✅/⏸️ 启用或禁用任务
-   - 点击 ❌ 删除任务
-6. **托盘运行** - 点击"最小化到托盘"让程序在后台运行
-7. **恢复窗口** - 点击系统托盘图标恢复主窗口
+3. **选择任务** - 从下拉菜单选择任务类型（关机/重启/锁屏/弹窗提醒）
+4. **自定义消息** - 选择弹窗提醒时可输入自定义提示内容
+5. **添加任务** - 点击"添加定时任务"按钮
+6. **管理任务** - 在任务列表中可以：
+   - 点击"启用/禁用"切换任务状态
+   - 点击"删除"移除任务
+7. **托盘运行** - 点击关闭按钮或"最小化到托盘"，程序在后台运行
+8. **恢复窗口** - 点击系统托盘图标菜单中的"显示主窗口"
 
 ## 📝 注意事项
 
@@ -70,8 +68,8 @@ cargo run
 
 关机和重启操作需要管理员权限。程序会自动请求必要的权限，但你可能需要：
 
-1. **以管理员身份运行** - 右键点击程序，选择“以管理员身份运行”
-2. **UAC 提示** - 首次执行时可能会弹出 UAC 提示，请点击“是”
+1. **以管理员身份运行** - 右键点击程序，选择"以管理员身份运行"
+2. **UAC 提示** - 首次执行时可能会弹出 UAC 提示，请点击"是"
 
 ### macOS 权限要求
 
@@ -88,15 +86,10 @@ macOS 系统对自动化脚本有严格的安全限制，使用前需要授权�
    - 在同一界面选择「自动化」
    - 确保允许 AppleScript 控制计算机
 
-3. **完全磁盘访问权限**（可选）
-   - 如果遇到权限问题，可以授予「完全磁盘访问权限」
-
 ### macOS 功能说明
 
 - **关机/重启**: 使用 AppleScript 调用系统命令，可能需要确认对话框
-- **锁屏**: 
-  - macOS Monterey (12.0) 及以上：使用 `pmset displaysleepnow`
-  - 旧版本：使用快捷键 Control+Command+Q
+- **锁屏**: 使用 `pmset displaysleepnow`
 - **弹窗**: 使用 AppleScript 的 `display dialog` 命令
 
 ### 混合关机（Windows 8+）
@@ -112,52 +105,19 @@ powercfg /h off
 
 ```
 timer-assistant/
+├── ui/
+│   └── timer_app.slint   # Slint UI 定义（550×650 窗口）
 ├── src/
-│   ├── main.rs          # 主程序入口和 UI
-│   ├── tray.rs          # 系统托盘功能
-│   ├── windows_api.rs   # Windows API 封装
-│   ├── macos_api.rs     # macOS API 封装（集成在 windows_api.rs）
-│   └── scheduler.rs     # 任务调度器
+│   ├── main.rs           # 主程序入口、UI 回调绑定、macOS 托盘
+│   ├── tray.rs           # Windows/Linux 系统托盘（tray-icon crate）
+│   ├── windows_api.rs    # 跨平台 API 封装（Windows/macOS/仿真）
+│   └── scheduler.rs      # 任务调度器（后台线程每秒检查）
 ├── fonts/
-│   └── simsun.ttc       # Windows 中文字体
-├── icons/
-│   └── app.png          # 应用图标
-├── Cargo.toml           # 项目配置和依赖
-├── README.md            # 说明文档
-├── QUICKSTART.md        # 快速开始指南
-└── PROJECT_SUMMARY.md   # 项目总结
+│   └── PingFang.ttc      # 中文字体
+├── build.rs              # 构建脚本（slint-build 编译 UI）
+└── Cargo.toml            # 项目配置和依赖
 ```
-
-## 🔧 开发说明
-
-### 添加新功能
-
-1. 在 `scheduler.rs` 中添加新的 `TaskType` 枚举值
-2. 在 `execute_task` 函数中实现对应的执行逻辑
-3. 在 `main.rs` 的 UI 中添加新选项
-
-### Windows API 调用
-
-所有 Windows API 调用都封装在 `windows_api.rs` 中：
-
-- `shutdown()` - 关机
-- `reboot()` - 重启
-- `lock_screen()` - 锁屏
-- `show_popup()` - 弹窗
-
-### 任务调度
-
-任务调度器使用 tokio 异步运行时，每秒检查一次是否有需要执行的任务。
 
 ## 📄 许可证
 
 MIT License
-
-## 🤝 贡献
-
-欢迎提交 Issue 和 Pull Request！
-
-## 📮 联系方式
-
-如有问题或建议，请提交 Issue。
-# timer-assistant

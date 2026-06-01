@@ -3,6 +3,9 @@ name = "timer-assistant"
 version = "0.1.0"
 edition = "2021"
 
+[build-dependencies]
+slint-build = "1.6"
+
 [target.'cfg(windows)'.build-dependencies]
 embed-resource = "2.4"
 
@@ -10,9 +13,8 @@ embed-resource = "2.4"
 cocoa = "0.25"
 
 [dependencies]
-# GUI 框架 - 升级到最新版本以支持更好的中文输入
-egui = "0.31"
-eframe = { version = "0.31", features = ["persistence"] }
+# GUI 框架 - Slint
+slint = { version = "1.6", features = ["compat-1-2", "std"] }
 
 # 系统托盘
 tray-icon = "0.19"
@@ -21,6 +23,7 @@ tao = "0.31"
 # macOS 支持
 [target.'cfg(target_os = "macos")'.dependencies]
 cocoa = "0.25"
+objc = "0.2"
 
 # 异步运行时和定时器
 tokio = { version = "1", features = ["full"] }
