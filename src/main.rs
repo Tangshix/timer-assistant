@@ -83,20 +83,29 @@ impl eframe::App for TimerApp {
         // 从 Arc<AtomicBool> 读取可见状态
         let is_visible = self.visible.load(Ordering::SeqCst);
         
-        // 检测可见状态变化
+        // 检测可见状态变化（即使在不可见状态下也要检测）
         if is_visible != self.last_visible {
             self.last_visible = is_visible;
-            println!("窗口可见性变化: {} -> {}", !is_visible, is_visible);
+            println!("窗口可见性变化: {} -> {}", if self.last_visible { "false" } else { "true" }, is_visible);
             
             // 发送窗口可见性命令
+            println!("发送 ViewportCommand::Visible({})", is_visible);
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(is_visible));
             
             // 同时强制请求重绘
             ctx.request_repaint();
+            
+            // 如果窗口变为可见，确保它获得焦点
+            if is_visible {
+                println!("窗口变为可见，发送聚焦命令");
+                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            }
         }
         
-        // 如果不可见，不渲染UI内容（但 update 仍会被调用）
+        // 如果不可见，不渲染UI内容，但要持续请求重绘以检测状态变化
         if !is_visible {
+            // 持续请求重绘，确保能检测到 visible 状态的变化
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
             return;
         }
 
@@ -317,7 +326,7 @@ fn main() -> eframe::Result<()> {
     // 创建应用
     let mut app = TimerApp::new();
     let visible_clone = app.visible.clone();
-    let scheduler_clone = app.scheduler.clone();
+    let _scheduler_clone = app.scheduler.clone();
     
     // 初始化托盘（传入 visible 状态）
     let (tray_icon, countdown_rx, countdown_tx) = tray::create_tray_icon(visible_clone.clone());
@@ -383,13 +392,27 @@ fn main() -> eframe::Result<()> {
             // 配置中文字体支持
             let mut fonts = egui::FontDefinitions::default();
             
-            // 添加系统中文字体（优先使用微软雅黑）
-            fonts.font_data.insert(
-                "chinese_font".to_owned(),
-                std::sync::Arc::new(egui::FontData::from_static(include_bytes!("../fonts/simsun.ttc"))),
-            );
+            // 根据平台添加中文字体
+            #[cfg(windows)]
+            {
+                // Windows: 使用宋体
+                fonts.font_data.insert(
+                    "chinese_font".to_owned(),
+                    std::sync::Arc::new(egui::FontData::from_static(include_bytes!("../fonts/simsun.ttc"))),
+                );
+            }
             
-            // 将中文字体添加到所有字体家族
+            #[cfg(target_os = "macos")]
+            {
+                // macOS: 使用系统自带中文字体（苹方）
+                // 苹方字体在 macOS 上的路径
+                fonts.font_data.insert(
+                    "chinese_font".to_owned(),
+                    std::sync::Arc::new(egui::FontData::from_static(include_bytes!("../fonts/PingFang.ttc"))),
+                );
+            }
+            
+            // 将中文字体添加到所有字体家族的最前面
             for family in fonts.families.values_mut() {
                 family.insert(0, "chinese_font".to_owned());
             }

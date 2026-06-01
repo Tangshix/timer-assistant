@@ -62,7 +62,7 @@ pub fn create_tray_icon(
                     visible_clone.store(true, Ordering::SeqCst);
                     println!("通过菜单显示窗口");
                     
-                    // 直接使用 Windows API 显示窗口
+                    // Windows: 直接使用 Windows API 显示窗口
                     #[cfg(windows)]
                     unsafe {
                         use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, SetForegroundWindow};
@@ -82,6 +82,24 @@ pub fn create_tray_icon(
                             println!("已通过 Windows API 显示窗口");
                         } else {
                             println!("未找到窗口句柄，尝试所有方法失败");
+                        }
+                    }
+                    
+                    // macOS: 使用 cocoa 框架激活应用
+                    #[cfg(target_os = "macos")]
+                    {
+                        use cocoa::appkit::{NSApp, NSApplication};
+                        
+                        unsafe {
+                            let app = NSApp();
+                            if !app.is_null() {
+                                // 激活应用并使其成为前台应用
+                                // 这会确保应用窗口显示并获取焦点
+                                app.activateIgnoringOtherApps_(cocoa::base::YES);
+                                println!("macOS: 已激活应用，窗口应已显示");
+                            } else {
+                                println!("macOS: NSApp 为空，无法显示窗口");
+                            }
                         }
                     }
                 } else if event.id.0 == MENU_EXIT {

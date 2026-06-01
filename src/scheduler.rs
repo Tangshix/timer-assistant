@@ -170,7 +170,14 @@ fn execute_task(task: &ScheduledTask) {
                     eprintln!("关机失败: {}", e);
                 }
             }
+            #[cfg(target_os = "macos")]
+            {
+                if let Err(e) = crate::windows_api::macos::shutdown() {
+                    eprintln!("关机失败: {}", e);
+                }
+            }
             #[cfg(not(windows))]
+            #[cfg(not(target_os = "macos"))]
             {
                 crate::windows_api::non_windows::shutdown().ok();
             }
@@ -183,7 +190,14 @@ fn execute_task(task: &ScheduledTask) {
                     eprintln!("重启失败: {}", e);
                 }
             }
+            #[cfg(target_os = "macos")]
+            {
+                if let Err(e) = crate::windows_api::macos::reboot() {
+                    eprintln!("重启失败: {}", e);
+                }
+            }
             #[cfg(not(windows))]
+            #[cfg(not(target_os = "macos"))]
             {
                 crate::windows_api::non_windows::reboot().ok();
             }
@@ -196,7 +210,14 @@ fn execute_task(task: &ScheduledTask) {
                     eprintln!("锁屏失败: {}", e);
                 }
             }
+            #[cfg(target_os = "macos")]
+            {
+                if let Err(e) = crate::windows_api::macos::lock_screen() {
+                    eprintln!("锁屏失败: {}", e);
+                }
+            }
             #[cfg(not(windows))]
+            #[cfg(not(target_os = "macos"))]
             {
                 crate::windows_api::non_windows::lock_screen().ok();
             }
@@ -211,7 +232,15 @@ fn execute_task(task: &ScheduledTask) {
                     message,
                 );
             }
+            #[cfg(target_os = "macos")]
+            {
+                crate::windows_api::macos::show_popup(
+                    "定时提醒",
+                    message,
+                );
+            }
             #[cfg(not(windows))]
+            #[cfg(not(target_os = "macos"))]
             {
                 crate::windows_api::non_windows::show_popup(
                     "定时提醒",
