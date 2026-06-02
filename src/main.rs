@@ -47,7 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 创建 macOS 菜单栏托盘图标
     #[cfg(target_os = "macos")]
     let status_item = {
-        use cocoa::appkit::{NSStatusBar, NSStatusItem, NSMenu, NSMenuItem, NSButton};
+        use cocoa::appkit::{NSStatusBar, NSStatusItem, NSMenu, NSMenuItem, NSButton, NSImage};
         use cocoa::base::selector;
         use cocoa::foundation::NSString;
         use objc::runtime::{Object, Sel};
@@ -56,9 +56,64 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         unsafe {
             let status_item = NSStatusBar::systemStatusBar(nil).statusItemWithLength_(-1.0);
             let button = status_item.button();
-            let title = NSString::alloc(nil).init_str("\u{23F0}");
-            button.setTitle_(title);
-            let _: () = msg_send![title, release];
+            
+            // 加载图标图片（支持开发模式和打包后两种路径）
+            let icon_path = {
+                // 先尝试 App Bundle 的资源路径
+                let bundle_path = std::env::current_exe()
+                    .ok()
+                    .and_then(|p| p.parent().map(|pp| pp.join("../Resources/app.png")))
+                    .unwrap_or_default();
+                
+                if bundle_path.exists() {
+                    bundle_path
+                } else {
+                    // 开发模式：直接使用项目目录的图标
+                    let dev_path = std::env::current_dir()
+                        .unwrap_or_default()
+                        .join("icons/app.png");
+                    
+                    if dev_path.exists() {
+                        dev_path
+                    } else {
+                        // 两个路径都找不到，返回空路径
+                        std::path::PathBuf::new()
+                    }
+                }
+            };
+            
+            // 尝试加载图片，如果失败则使用文字图标
+            let ns_image = if !icon_path.as_os_str().is_empty() && icon_path.exists() {
+                let icon_path_str = NSString::alloc(nil).init_str(&icon_path.to_string_lossy());
+                let img = NSImage::alloc(nil).initWithContentsOfFile_(icon_path_str);
+                let _: () = msg_send![icon_path_str, release];
+                if !img.is_null() {
+                    img
+                } else {
+                    // 图片加载失败，使用文字图标
+                    let title = NSString::alloc(nil).init_str("\u{23F0}");
+                    button.setTitle_(title);
+                    let _: () = msg_send![title, release];
+                    nil
+                }
+            } else {
+                // 图片文件不存在，使用文字图标
+                println!("警告: 图标文件不存在，使用默认图标");
+                let title = NSString::alloc(nil).init_str("\u{23F0}");
+                button.setTitle_(title);
+                let _: () = msg_send![title, release];
+                nil
+            };
+            
+            // 如果图片加载成功，设置图标
+            if !ns_image.is_null() {
+                // 设置图标大小
+                let _: () = msg_send![ns_image, setSize:cocoa::foundation::NSSize::new(18.0, 18.0)];
+                button.setImage_(ns_image);
+                
+                // 不使用模板模式，保留原始颜色
+                // let _: () = msg_send![ns_image, setTemplate: false];
+            }
 
             let menu = NSMenu::new(nil);
             let show_item = NSMenuItem::alloc(nil)
@@ -148,29 +203,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         format!("{:02}:{:02}", m, s)
                     };
                     let title = format!("电脑定时助手 - {} {}", name, time_str);
-                    let tray = format!("\u{23F0} {}", time_str);
+                    let tray = format!(" {}", time_str);  // 去掉闹钟emoji，只显示倒计时
                     let tip = format!("{} {} 剩余", name, time_str);
                     (title, tray, tip)
                 } else {
-                    ("电脑定时助手".to_string(), "\u{23F0}".to_string(), "暂无任务".to_string())
+                    ("电脑定时助手".to_string(), "".to_string(), "暂无任务".to_string())
                 }
             } else {
-                ("电脑定时助手".to_string(), "\u{23F0}".to_string(), "暂无任务".to_string())
+                ("电脑定时助手".to_string(), "".to_string(), "暂无任务".to_string())
             };
             ui_ref.set_window_title(title.into());
             // 更新托盘图标：倒计时文字 + tooltip
             #[cfg(target_os = "macos")]
             unsafe {
-                use cocoa::appkit::{NSStatusItem, NSButton};
+                use cocoa::appkit::NSStatusItem;
                 use cocoa::base::nil;
                 use cocoa::foundation::NSString;
                 let button = status_item.button();
-                let btn_title = NSString::alloc(nil).init_str(&tray_text);
-                button.setTitle_(btn_title);
-                let _: () = msg_send![btn_title, release];
+                
+                // 更新 tooltip
                 let tip = NSString::alloc(nil).init_str(&tooltip);
                 let _: () = msg_send![button, setToolTip:tip];
                 let _: () = msg_send![tip, release];
+                
+                // 如果有倒计时，显示倒计时文字；否则只显示蓝色钟表图标
+                if !tray_text.is_empty() {
+                    // 有倒计时：显示蓝色钟表 + 倒计时文字
+                    let title = NSString::alloc(nil).init_str(&tray_text);
+                    let _: () = msg_send![button, setTitle:title];
+                    let _: () = msg_send![title, release];
+                } else {
+                    // 没有倒计时：清空文字，只显示蓝色钟表图标
+                    let title = NSString::alloc(nil).init_str("");
+                    let _: () = msg_send![button, setTitle:title];
+                    let _: () = msg_send![title, release];
+                }
             }
         }
     });
