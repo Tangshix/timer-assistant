@@ -112,8 +112,6 @@ timer-assistant/
 │   ├── tray.rs           # Windows/Linux 系统托盘（tray-icon crate）
 │   ├── windows_api.rs    # 跨平台 API 封装（Windows/macOS/仿真）
 │   └── scheduler.rs      # 任务调度器（后台线程每秒检查）
-├── fonts/
-│   └── PingFang.ttc      # 中文字体
 ├── build.rs              # 构建脚本（slint-build 编译 UI）
 └── Cargo.toml            # 项目配置和依赖
 ```

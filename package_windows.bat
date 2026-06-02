@@ -38,7 +38,6 @@ echo [3/5] 创建发布目录结构...
 set RELEASE_DIR=dist\timer-assistant-windows
 if exist "%RELEASE_DIR%" rmdir /s /q "%RELEASE_DIR%"
 mkdir "%RELEASE_DIR%"
-mkdir "%RELEASE_DIR%\fonts"
 mkdir "%RELEASE_DIR%\icons"
 
 :: 复制可执行文件
@@ -46,7 +45,6 @@ echo.
 echo [4/5] 复制文件到发布目录...
 copy "target\release\timer-assistant.exe" "%RELEASE_DIR%\" >nul
 copy "README.md" "%RELEASE_DIR%\" >nul
-copy "fonts\PingFang.ttc" "%RELEASE_DIR%\fonts\" >nul 2>&1
 copy "icons\app.png" "%RELEASE_DIR%\icons\" >nul 2>&1
 
 :: 创建使用说明
