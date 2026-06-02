@@ -1,12 +1,10 @@
-use image::ImageEncoder;
-
 fn main() {
-    // 编译 Slint UI
     slint_build::compile("ui/timer_app.slint").unwrap();
 
-    // Windows: 将 PNG 转换为 ICO 并嵌入 exe 资源（设置任务栏图标）
     #[cfg(windows)]
     {
+        use image::ImageEncoder;
+
         let png_path = "icons/app.png";
         let ico_path = "target/app.ico";
         let rc_path = "target/app.rc";
