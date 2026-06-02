@@ -158,6 +158,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(not(target_os = "macos"))]
     let _tray_icon = tray::create_tray_icon();
 
+    // 设置窗口任务栏图标（Windows/Linux）
+    #[cfg(not(target_os = "macos"))]
+    {
+        let (w, h, rgba) = tray::get_app_icon_rgba();
+        let buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(&rgba, w, h);
+        let icon = slint::Image::from_rgba_pixels(buf);
+        ui.window().set_icon(icon);
+    }
+
     // 轮询托盘菜单事件，恢复窗口
     #[cfg(not(target_os = "macos"))]
     {
