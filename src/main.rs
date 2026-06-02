@@ -159,7 +159,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let ui_weak_tray = ui.as_weak();
         tray::create_tray_icon(move || {
             if let Some(ui_ref) = ui_weak_tray.upgrade() {
-                ui_ref.window().show().ok();
+                ui_ref.window().set_minimized(false);
+                ui_ref.window().show();
             }
         })
     };
