@@ -30,9 +30,35 @@ pub fn create_tray_icon<F: Fn() + Send + 'static>(show_window: F) -> TrayIcon {
     TrayIconBuilder::new()
         .with_menu(Box::new(menu))
         .with_tooltip("电脑定时助手")
-        .with_icon(create_clock_icon())
+        .with_icon(load_app_icon())
         .build()
         .unwrap()
+}
+
+fn load_app_icon() -> Icon {
+    // 尝试从多个路径加载 icons/app.png
+    let icon_paths = [
+        std::env::current_dir().ok().map(|p| p.join("icons/app.png")),
+        std::env::current_exe().ok().and_then(|p| {
+            p.parent().map(|parent| parent.join("icons/app.png"))
+        }),
+    ];
+
+    for path_opt in &icon_paths {
+        if let Some(ref path) = path_opt {
+            if path.exists() {
+                if let Ok(img) = image::open(path) {
+                    let rgba = img.to_rgba8();
+                    let (width, height) = rgba.dimensions();
+                    return Icon::from_rgba(rgba.into_raw(), width, height).unwrap();
+                }
+            }
+        }
+    }
+
+    //  fallback: 使用代码绘制的时钟图标
+    eprintln!("警告: 无法加载 icons/app.png，使用默认图标");
+    create_clock_icon()
 }
 
 fn create_clock_icon() -> Icon {

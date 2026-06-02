@@ -63,6 +63,7 @@ export component TimerApp inherits Window {
     height: 650px;
     in-out property<string> window-title: "电脑定时助手";
     title: root.window-title;
+    icon: @image-url("../icons/app.png");
 
     // 回调函数
     callback add-task();
@@ -241,11 +242,6 @@ export component TimerApp inherits Window {
                 Button {
                     text: "🗑️ 清空所有任务";
                     clicked => { root.clear-all(); }
-                }
-                
-                Button {
-                    text: "➖ 最小化到托盘";
-                    clicked => { root.minimize-to-tray(); }
                 }
                 
                 Button {
