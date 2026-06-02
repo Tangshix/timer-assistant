@@ -45,3 +45,10 @@ windows = { version = "0.58", features = [
     "Win32_Security",
     "Win32_System_Threading",
 ] }
+
+# 发布版本优化配置
+[profile.release]
+strip = true          # 去除调试符号，减小体积
+lto = true            # 链接时优化
+codegen-units = 1     # 优化编译单元
+panic = 'abort'       # 减小二进制大小

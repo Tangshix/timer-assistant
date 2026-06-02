@@ -20,5 +20,14 @@ Thumbs.db
 *.lib
 *.pdb
 
+# Packaging
+dist/
+*.zip
+*.dmg
+*.tar.gz
+*.msi
+*.deb
+*.rpm
+
 # Windows reserved names
 nul

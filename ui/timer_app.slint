@@ -43,7 +43,7 @@ component TimerItem inherits Rectangle {
         }
 
         Button {
-            text: root.enabled ? "启用" : "禁用";
+            text: root.enabled ? "禁用" : "启用";
             min-width: 32px;
             max-width: 50px;
             clicked => { root.toggle(); }
@@ -93,7 +93,7 @@ export component TimerApp inherits Window {
 
             // 标题
             Text {
-                text: "⏰ 电脑定时助手";
+                text: " 电脑定时助手";
                 font-size: 24px;
                 color: #333;
             }
