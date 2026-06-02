@@ -1,3 +1,5 @@
+use image::ImageEncoder;
+
 fn main() {
     // 编译 Slint UI
     slint_build::compile("ui/timer_app.slint").unwrap();
@@ -18,7 +20,7 @@ fn main() {
                 .unwrap();
 
             std::fs::write(rc_path, format!("1 ICON \"{}\"", ico_path)).unwrap();
-            embed_resource::compile(rc_path, embed_resource::None);
+            embed_resource::compile(rc_path, embed_resource::NONE);
         }
     }
 }
