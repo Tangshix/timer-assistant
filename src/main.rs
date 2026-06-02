@@ -1,7 +1,10 @@
+#![allow(unexpected_cfgs)]
+
 #[cfg(target_os = "macos")]
 #[macro_use]
 extern crate objc;
 
+#[cfg(not(target_os = "macos"))]
 mod tray;
 mod windows_api;
 mod scheduler;
@@ -33,10 +36,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ui.window().on_close_requested({
         let ui_weak = ui.as_weak();
         move || {
-            println!("Windows: 点击关闭按钮，准备隐藏到托盘");
             if let Some(ui_ref) = ui_weak.upgrade() {
-                let _ = ui_ref.window().hide();
-                println!("Windows: 窗口已隐藏");
+                ui_ref.window().set_minimized(true);
             }
             slint::CloseRequestResponse::KeepWindowShown
         }
@@ -335,11 +336,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(0);
     });
     
-    // 最小化到托盘回调（隐藏整个应用）- macOS专用
+    // 最小化到托盘回调
     #[cfg(target_os = "macos")]
     ui.on_minimize_to_tray(|| unsafe {
         let app: id = msg_send![class!(NSApplication), sharedApplication];
         let _: () = msg_send![app, hide:nil];
+    });
+
+    #[cfg(not(target_os = "macos"))]
+    ui.on_minimize_to_tray({
+        let ui_weak = ui.as_weak();
+        move || {
+            if let Some(ui_ref) = ui_weak.upgrade() {
+                ui_ref.window().set_minimized(true);
+            }
+        }
     });
     
     // 初始加载任务列表
