@@ -39,15 +39,6 @@ pub fn create_tray_icon() -> TrayIcon {
         .unwrap()
 }
 
-/// 获取应用图标 RGBA 数据（用于设置窗口任务栏图标）
-pub fn get_app_icon_rgba() -> (u32, u32, Vec<u8>) {
-    let img = image::load_from_memory(include_bytes!("../icons/app.png"))
-        .expect("无法解码内置图标");
-    let rgba = img.to_rgba8();
-    let (w, h) = rgba.dimensions();
-    (w, h, rgba.into_raw())
-}
-
 /// 检查是否有待处理的"显示窗口"事件（非阻塞）
 pub fn check_show_event() -> bool {
     if let Some(rx) = SHOW_CHANNEL.get() {
