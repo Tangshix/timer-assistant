@@ -69,7 +69,6 @@ fn load_app_icon() -> Icon {
         }
     }
 
-    eprintln!("警告: 无法加载 icons/app.png，使用默认图标");
     create_clock_icon()
 }
 
