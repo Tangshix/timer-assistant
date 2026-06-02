@@ -153,17 +153,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    // 创建 Windows/Linux 系统托盘图标（局部变量，需保持存活直到程序退出）
+    // 创建 Windows/Linux 系统托盘图标
     #[cfg(not(target_os = "macos"))]
-    let _tray_icon = {
+    let _tray_icon = tray::create_tray_icon();
+
+    // 轮询托盘菜单事件，恢复窗口
+    #[cfg(not(target_os = "macos"))]
+    {
         let ui_weak_tray = ui.as_weak();
-        tray::create_tray_icon(move || {
-            if let Some(ui_ref) = ui_weak_tray.upgrade() {
-                ui_ref.window().set_minimized(false);
-                ui_ref.window().show();
-            }
-        })
-    };
+        let tray_timer = slint::Timer::default();
+        tray_timer.start(
+            slint::TimerMode::Repeated,
+            std::time::Duration::from_millis(100),
+            move || {
+                if tray::check_show_event() {
+                    if let Some(ui_ref) = ui_weak_tray.upgrade() {
+                        ui_ref.window().set_minimized(false);
+                        ui_ref.window().show();
+                    }
+                }
+            },
+        );
+    }
 
     // 定时刷新任务列表 + 更新窗口标题和托盘 tooltip
     let scheduler_refresh = scheduler.clone();
