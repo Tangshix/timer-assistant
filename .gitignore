@@ -31,3 +31,10 @@ dist/
 
 # Windows reserved names
 nul
+
+# Non-Rust/Slint files (kept locally, not tracked)
+*.sh
+*.bat
+*.manifest
+fonts/
+icons/
