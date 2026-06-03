@@ -1,31 +1,35 @@
+use std::sync::Mutex;
 use tray_icon::{
     menu::{Menu, MenuItem, PredefinedMenuItem, MenuEvent},
     TrayIcon, TrayIconBuilder, Icon,
 };
 
-/// 创建系统托盘图标（Windows/Linux），返回 TrayIcon
-/// 调用方必须持有返回值，否则图标会消失
-pub fn create_tray_icon<F: Fn() + Send + 'static>(show_window: F) -> TrayIcon {
-    let menu = Menu::new();
+static SHOW_CHANNEL: std::sync::OnceLock<Mutex<std::sync::mpsc::Receiver<()>>> =
+    std::sync::OnceLock::new();
 
-    menu.append(&MenuItem::with_id("countdown", "暂无任务", false, None)).unwrap();
-    menu.append(&PredefinedMenuItem::separator()).unwrap();
-    menu.append(&MenuItem::with_id("show", "显示主窗口", true, None)).unwrap();
-    menu.append(&PredefinedMenuItem::separator()).unwrap();
-    menu.append(&MenuItem::with_id("exit", "退出", true, None)).unwrap();
+/// 创建系统托盘图标，返回 TrayIcon（调用方必须持有，否则图标消失）
+pub fn create_tray_icon() -> TrayIcon {
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    let _ = SHOW_CHANNEL.set(Mutex::new(rx));
 
+    // 菜单事件监听线程
     std::thread::spawn(move || {
         let receiver = MenuEvent::receiver();
         loop {
             if let Ok(event) = receiver.recv() {
-                match event.id.0.as_str() {
-                    "show" => show_window(),
-                    "exit" => std::process::exit(0),
-                    _ => {}
+                if event.id.0 == "show" {
+                    let _ = tx.send(());
+                } else if event.id.0 == "exit" {
+                    std::process::exit(0);
                 }
             }
         }
     });
+
+    let menu = Menu::new();
+    menu.append(&MenuItem::with_id("show", "显示主窗口", true, None)).unwrap();
+    menu.append(&PredefinedMenuItem::separator()).unwrap();
+    menu.append(&MenuItem::with_id("exit", "退出", true, None)).unwrap();
 
     TrayIconBuilder::new()
         .with_menu(Box::new(menu))
@@ -35,30 +39,22 @@ pub fn create_tray_icon<F: Fn() + Send + 'static>(show_window: F) -> TrayIcon {
         .unwrap()
 }
 
-fn load_app_icon() -> Icon {
-    // 尝试从多个路径加载 icons/app.png
-    let icon_paths = [
-        std::env::current_dir().ok().map(|p| p.join("icons/app.png")),
-        std::env::current_exe().ok().and_then(|p| {
-            p.parent().map(|parent| parent.join("icons/app.png"))
-        }),
-    ];
-
-    for path_opt in &icon_paths {
-        if let Some(ref path) = path_opt {
-            if path.exists() {
-                if let Ok(img) = image::open(path) {
-                    let rgba = img.to_rgba8();
-                    let (width, height) = rgba.dimensions();
-                    return Icon::from_rgba(rgba.into_raw(), width, height).unwrap();
-                }
-            }
+/// 检查是否有待处理的"显示窗口"事件（非阻塞）
+pub fn check_show_event() -> bool {
+    if let Some(rx) = SHOW_CHANNEL.get() {
+        if let Ok(rx) = rx.try_lock() {
+            return rx.try_recv().is_ok();
         }
     }
+    false
+}
 
-    //  fallback: 使用代码绘制的时钟图标
-    eprintln!("警告: 无法加载 icons/app.png，使用默认图标");
-    create_clock_icon()
+fn load_app_icon() -> Icon {
+    let img = image::load_from_memory(include_bytes!("../icons/app.png"))
+        .expect("无法解码内置图标");
+    let rgba = img.to_rgba8();
+    let (w, h) = rgba.dimensions();
+    Icon::from_rgba(rgba.into_raw(), w, h).unwrap()
 }
 
 fn create_clock_icon() -> Icon {

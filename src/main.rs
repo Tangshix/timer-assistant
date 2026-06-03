@@ -1,7 +1,11 @@
+#![allow(unexpected_cfgs)]
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 #[cfg(target_os = "macos")]
 #[macro_use]
 extern crate objc;
 
+#[cfg(not(target_os = "macos"))]
 mod tray;
 mod windows_api;
 mod scheduler;
@@ -33,10 +37,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ui.window().on_close_requested({
         let ui_weak = ui.as_weak();
         move || {
-            println!("Windows: 点击关闭按钮，准备隐藏到托盘");
             if let Some(ui_ref) = ui_weak.upgrade() {
-                let _ = ui_ref.window().hide();
-                println!("Windows: 窗口已隐藏");
+                ui_ref.window().set_minimized(true);
             }
             slint::CloseRequestResponse::KeepWindowShown
         }
@@ -152,16 +154,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    // 创建 Windows/Linux 系统托盘图标（局部变量，需保持存活直到程序退出）
+    // 创建 Windows/Linux 系统托盘图标
     #[cfg(not(target_os = "macos"))]
-    let _tray_icon = {
+    let _tray_icon = tray::create_tray_icon();
+
+    // 设置窗口任务栏图标（通过 build.rs 嵌入 Windows 资源）
+
+    // 轮询托盘菜单事件，恢复窗口
+    #[cfg(not(target_os = "macos"))]
+    {
         let ui_weak_tray = ui.as_weak();
-        tray::create_tray_icon(move || {
-            if let Some(ui_ref) = ui_weak_tray.upgrade() {
-                ui_ref.window().show().ok();
-            }
-        })
-    };
+        let tray_timer = slint::Timer::default();
+        tray_timer.start(
+            slint::TimerMode::Repeated,
+            std::time::Duration::from_millis(100),
+            move || {
+                if tray::check_show_event() {
+                    if let Some(ui_ref) = ui_weak_tray.upgrade() {
+                        ui_ref.window().set_minimized(false);
+                        ui_ref.window().show();
+                    }
+                }
+            },
+        );
+    }
 
     // 定时刷新任务列表 + 更新窗口标题和托盘 tooltip
     let scheduler_refresh = scheduler.clone();
@@ -335,11 +351,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(0);
     });
     
-    // 最小化到托盘回调（隐藏整个应用）- macOS专用
+    // 最小化到托盘回调
     #[cfg(target_os = "macos")]
     ui.on_minimize_to_tray(|| unsafe {
         let app: id = msg_send![class!(NSApplication), sharedApplication];
         let _: () = msg_send![app, hide:nil];
+    });
+
+    #[cfg(not(target_os = "macos"))]
+    ui.on_minimize_to_tray({
+        let ui_weak = ui.as_weak();
+        move || {
+            if let Some(ui_ref) = ui_weak.upgrade() {
+                ui_ref.window().set_minimized(true);
+            }
+        }
     });
     
     // 初始加载任务列表
