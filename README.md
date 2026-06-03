@@ -6,7 +6,8 @@
 
 
 ## 界面预览
-![img_1.png](img.png)
+<img width="544" height="674" alt="img" src="https://github.com/user-attachments/assets/6888d6c5-e0b5-4c0c-b8ee-3d079c433b06" />
+
 
 
 ## 功能特性
